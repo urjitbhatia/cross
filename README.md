@@ -12,22 +12,22 @@ Each worker has access to 3 levels of work queues:
 
 ## Future enhancements:
 
-[ ] Tests
-[ ] Additional examples/worker types - currently http agent is supported
-    [ ] Image downloader
-    [ ] Purely functional graph crawler
-    [ ] JSON graph crawler
-[ ] Data Sinks:
-    [ ] S3 Sink
-    [x] FS Sink
-    [ ] Webhook Sink
-    [ ] Vector Store Sink
-[ ] Add ability to run across multiple nodes and use gossip to discover them
-[ ] Ability for each node to advertize their "busyness" or "load" factor
-[ ] Ability to steal work from remote nodes
-[ ] Ability to steal work intelligently - from the highest loaded node in the cluster
-[ ] Ability to shutdown gracefull in network mode - if there are other nodes, push work to them before stopping
-[ ] AI Agent Framework:
-    [ ] Make AI agent calls which can enqueue other calls
-    [ ] Support functions
+- [ ] Tests
+- [ ] Additional examples/worker types - currently http agent is supported
+    - [ ] Image downloader
+    - [ ] Purely functional graph crawler
+    - [ ] JSON graph crawler
+- [ ] Data Sinks:
+    - [ ] S3 Sink
+    - [x] FS Sink
+    - [ ] Webhook Sink
+    - [ ] Vector Store Sink
+- [ ] Add ability to run across multiple nodes and use gossip to discover them
+    - [ ] Ability for each node to advertize their "busyness" or "load" factor
+    - [ ] Ability to steal work from remote nodes
+    - [ ] Ability to steal work intelligently - from the highest loaded node in the cluster
+    - [ ] Ability to shutdown gracefull in network mode - if there are other nodes, push work to them before stopping
+- [ ] AI Agent Framework:
+    - [ ] Make AI agent calls which can enqueue other calls
+    - [ ] Support functions
 
