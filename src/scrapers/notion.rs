@@ -2,7 +2,7 @@
 macro_rules! URL_TMPL {
     ($block_id: expr) => {
         format!(
-            "https://example.com/v1/blocks/{}/children?page_size=100",
+            "https://api.notion.com/v1/blocks/{}/children?page_size=100",
             $block_id
         )
     };
@@ -10,7 +10,7 @@ macro_rules! URL_TMPL {
 macro_rules! NEXT_CURSOR_URL_TMPL {
     ($block_id: expr, $start_cursor_id: expr) => {
         format!(
-            "https://example.com/v1/blocks/{}/children?page_size=100&start_cursor={}",
+            "https://api.notion.com/v1/blocks/{}/children?page_size=100&start_cursor={}",
             $block_id, $start_cursor_id
         )
     };
