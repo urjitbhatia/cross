@@ -1,4 +1,11 @@
+use crate::textparsers::{make_json_api_call, parse_rich_text};
 
+use std::thread;
+
+use crossbeam_deque::Worker;
+use ureq::Agent;
+
+#[macro_export]
 macro_rules! URL_TMPL {
     ($block_id: expr) => {
         format!(
@@ -7,6 +14,8 @@ macro_rules! URL_TMPL {
         )
     };
 }
+
+#[macro_export]
 macro_rules! NEXT_CURSOR_URL_TMPL {
     ($block_id: expr, $start_cursor_id: expr) => {
         format!(
@@ -16,7 +25,7 @@ macro_rules! NEXT_CURSOR_URL_TMPL {
     };
 }
 
-fn read_page(
+pub fn read_page(
     http_client: Agent,
     mut page_url: String,
     page_id: String,
@@ -42,21 +51,27 @@ fn read_page(
         };
 
         // println!("{}", serde_json::to_string_pretty(&data).unwrap());
-        let Some(results) = data["results"].as_array() else { continue; };
+        let Some(results) = data["results"].as_array() else {
+            continue;
+        };
 
         for result in results {
             if result["type"].as_str().unwrap_or_default() == "link_to_page" {
                 let child_page_id = result["link_to_page"]["page_id"].as_str().unwrap();
                 println!("Pushing links_to_page link to worker: {child_page_id}");
                 w.push((
-                    String::from(BLOCK_CHILD_URL_TMPL!(child_page_id)),
+                    String::from(URL_TMPL!(child_page_id)),
                     String::from(child_page_id),
                 ));
             }
 
             {
-                let Some(result_type) = result["type"].as_str() else { continue; };
-                let Some(result) = result[result_type].as_object() else { continue; };
+                let Some(result_type) = result["type"].as_str() else {
+                    continue;
+                };
+                let Some(result) = result[result_type].as_object() else {
+                    continue;
+                };
                 match parse_rich_text(result, result_type) {
                     Some(r) => page_contents.push(r),
                     None => (),
@@ -70,13 +85,13 @@ fn read_page(
                         // these should be considered as new documents
                         println!("Pushing child_page link to worker: {child_page_id}");
                         w.push((
-                            String::from(BLOCK_CHILD_URL_TMPL!(child_page_id)),
+                            String::from(URL_TMPL!(child_page_id)),
                             String::from(child_page_id),
                         ));
                     } else {
                         let child_lines = read_page(
                             http_client.clone(),
-                            BLOCK_CHILD_URL_TMPL!(child_page_id),
+                            URL_TMPL!(child_page_id),
                             String::from(child_page_id),
                             w,
                         );
@@ -93,7 +108,7 @@ fn read_page(
         if data["has_more"].as_bool().unwrap_or_default() {
             match data["next_cursor"].as_str() {
                 Some(cur) => {
-                    page_url = String::from(BLOCK_NEXT_CURSOR_URL_TMPL!(page_id.clone(), cur));
+                    page_url = String::from(NEXT_CURSOR_URL_TMPL!(page_id.clone(), cur));
                 }
                 None => {
                     println!("Failed to unmarshal next cursor {}", data["next_cursor"]);

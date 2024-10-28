@@ -7,7 +7,6 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 // find_task fetches the next available task
@@ -40,7 +39,7 @@ where
     let workers: Vec<_> = (0..num_workers).map(|_| Worker::new_fifo()).collect();
     let stealers: Vec<_> = workers.iter().map(|w| w.stealer()).collect();
     let active_counter = ActiveCounter::new();
-    let started_counter = ActiveCounter::new();
+    // let started_counter = ActiveCounter::new();
     let num_workers = workers.len();
     let barrier = Arc::new(Barrier::new(num_workers));
 
@@ -67,7 +66,7 @@ where
             let stealers_copy = stealers.clone();
             let job_copy = job.clone();
             let mut counter_copy = active_counter.clone();
-            let mut started_counter_copy = started_counter.clone();
+            // let mut started_counter_copy = started_counter.clone();
             let barrier = Arc::clone(&barrier);
 
             // Create scope for single worker

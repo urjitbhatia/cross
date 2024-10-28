@@ -1,4 +1,5 @@
 // This is an http worker that can be used with the graph_walker for example to scrape the web or a list of urls etc
+use reqwest::header;
 use std::time::Duration;
 use std::{env, thread};
 use ureq::Error::Status;
@@ -46,4 +47,30 @@ pub fn get_http_agent() -> ureq::Agent {
         .middleware(headers_middleware())
         .build();
     return agent;
+}
+
+pub fn create_http_client() -> reqwest::blocking::Client {
+    let key = "AUTH_TOKEN";
+    let token = match env::var(key) {
+        Ok(token) => token,
+        Err(e) => {
+            println!("couldn't find env var {key}: {e}");
+            panic!("{e}");
+        }
+    };
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        header::HeaderValue::from_str(format!("Bearer {token}").as_str()).unwrap(),
+    );
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/json"),
+    );
+
+    reqwest::blocking::Client::builder()
+        .default_headers(headers)
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
 }

@@ -1,6 +1,14 @@
-use serde_json::Value;
+use std::{convert::identity, error::Error};
 
-fn parse_rich_text(result: &serde_json::Map<String, Value>, result_type: &str) -> Option<String> {
+use serde_json::Value;
+use ureq::Agent;
+
+use crate::workers::get_with_retry;
+
+pub fn parse_rich_text(
+    result: &serde_json::Map<String, Value>,
+    result_type: &str,
+) -> Option<String> {
     if !result.contains_key("rich_text") {
         return None;
     }
@@ -44,8 +52,7 @@ fn parse_rich_text(result: &serde_json::Map<String, Value>, result_type: &str) -
     Some(l + suffix)
 }
 
-
-fn make_json_api_call(agent: Agent, url: String) -> Result<Value, Error> {
-    let json: Value = http::get_with_retry(agent, url.as_str())?.into_json()?;
+pub fn make_json_api_call(agent: Agent, url: String) -> Result<Value, Box<dyn Error>> {
+    let json: Value = get_with_retry(agent, url.as_str())?.into_json()?;
     Ok(json)
 }
