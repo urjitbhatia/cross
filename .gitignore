@@ -1,0 +1,5 @@
+# Rust ignores
+target/
+
+# IDE ignores
+.vscode
