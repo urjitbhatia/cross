@@ -1,13 +1,10 @@
+use crate::taskgraph::job::GraphJob;
+use crate::taskgraph::task::ActiveCounter;
+
 use crossbeam_deque::{Injector, Stealer, Worker};
+use std::fmt::Error;
 use std::sync::Barrier;
-use std::{
-    iter,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    thread,
-};
+use std::{iter, sync::Arc, thread};
 
 // find_task fetches the next available task
 fn find_task<T>(local: &Worker<T>, global: &Injector<T>, stealers: &[Stealer<T>]) -> Option<T> {
@@ -28,19 +25,47 @@ fn find_task<T>(local: &Worker<T>, global: &Injector<T>, stealers: &[Stealer<T>]
     })
 }
 
+/// Walks a task graph in parallel using work stealing
+///
+/// This function takes an initial set of tasks and processes them in parallel using multiple worker threads.
+/// Each worker can generate new tasks during processing, which are then distributed among all workers.
+/// Work stealing is used to balance the load between threads.
+///
+/// # Arguments
+///
+/// * `initial` - A vector of initial tasks to process
+/// * `num_workers` - Number of worker threads to spawn
+/// * `job` - The function that processes each task. Takes a task and a worker queue as arguments.
+///          Can optionally return a result and/or generate new tasks by pushing to the worker queue.
+///
+/// # Type Parameters
+///
+/// * `IN` - The input task type that must implement Send
+/// * `OUT` - The output type that must implement Send
+/// * `JOB` - The job function type that must be Clone + Send and take IN and return Option<OUT>
+///
+/// # Returns
+///
+/// A vector containing all non-None results produced by the job function
+
 pub fn walk<IN, OUT, JOB>(initial: Vec<IN>, num_workers: usize, job: JOB) -> Vec<OUT>
 where
     IN: Send,
     OUT: Send,
-    JOB: Fn(IN, &Worker<IN>) -> Option<OUT> + Clone + Send,
+    JOB: GraphJob<IN, OUT, Error>,
 {
     // Create crossbeam_deque injector/worker/stealers
     let injector = Injector::new();
+    // Create num_workers workers
     let workers: Vec<_> = (0..num_workers).map(|_| Worker::new_fifo()).collect();
+
+    // Create task stealers for each worker
     let stealers: Vec<_> = workers.iter().map(|w| w.stealer()).collect();
+    // Create active counter to track when all workers are done
     let active_counter = ActiveCounter::new();
     // let started_counter = ActiveCounter::new();
-    let num_workers = workers.len();
+
+    // Create barrier to wait for all workers to start
     let barrier = Arc::new(Barrier::new(num_workers));
 
     // Seed injector with initial data
@@ -51,7 +76,7 @@ where
     // Create single scope to contain all workers
     let result: Vec<OUT> = crossbeam_utils::thread::scope(|scope| {
         println!(
-            "Top level thread: {:?} Num workers: {:?}",
+            "Top level thread id: {:?} Num workers: {:?}",
             thread::current().id(),
             workers.len()
         );
@@ -59,19 +84,22 @@ where
         // Container for all workers
         let mut worker_scopes: Vec<_> = Default::default();
 
-        // Create each worker
+        // Start all the workers
         for worker in workers.into_iter() {
             // Make copy of data so we can move clones or references into closure
             let injector_borrow = &injector;
             let stealers_copy = stealers.clone();
             let job_copy = job.clone();
             let mut counter_copy = active_counter.clone();
+
             // let mut started_counter_copy = started_counter.clone();
+
+            // No worker will start until the barrier is cleared
             let barrier = Arc::clone(&barrier);
 
             // Create scope for single worker
             let s = scope.spawn(move |_| {
-                println!("Creating thread: {:?}", thread::current().id());
+                println!("Creating worker thread: {:?}", thread::current().id());
 
                 // backoff spinner for sleeping
                 let backoff = crossbeam_utils::Backoff::new();
@@ -105,7 +133,7 @@ where
                             backoff.reset();
 
                             // do work
-                            if let Some(result) = job_copy(item, &worker) {
+                            if let Ok(Some(result)) = job_copy.process(item, &worker) {
                                 worker_results.push(result);
                             }
                         }
@@ -145,58 +173,95 @@ where
 }
 
 // used for testing the graph walker
-pub fn _run() {
-    walk(vec![1], 2, |f, w| {
-        println!("walk {f} in thread: {:?}", thread::current().id());
-        if f < 500 {
-            w.push(f + 1);
-        }
-        thread::sleep(std::time::Duration::from_secs(180));
-        Some(1)
-    });
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
-// Helpers to track when all workers are done
-#[derive(Clone)]
-struct ActiveCounter {
-    active_count: Arc<AtomicUsize>,
-}
-
-impl ActiveCounter {
-    pub fn take_token(&mut self) -> ActiveToken {
-        self.active_count.fetch_add(1, Ordering::SeqCst);
-        ActiveToken {
-            active_count: self.active_count.clone(),
-        }
+    #[test]
+    fn test_empty_input() {
+        let job = |_: i32, _: &Worker<i32>| Ok(Some(1));
+        let result: Vec<i32> = walk(vec![], 2, job);
+        assert!(result.is_empty());
     }
 
-    pub fn new() -> ActiveCounter {
-        ActiveCounter {
-            active_count: Arc::new(AtomicUsize::new(0)),
-        }
+    #[test]
+    fn test_simple_processing() {
+        let job = |x: i32, _: &Worker<i32>| Ok(Some(x * 2));
+        let result: Vec<i32> = walk(vec![1, 2, 3], 2, job);
+        assert_eq!(result.len(), 3);
+        assert!(result.contains(&2));
+        assert!(result.contains(&4));
+        assert!(result.contains(&6));
     }
 
-    pub fn is_zero(&self) -> bool {
-        self.active_count.load(Ordering::SeqCst) == 0
+    #[test]
+    fn test_task_generation() {
+        // Keep track of processed numbers
+        static PROCESSED: AtomicUsize = AtomicUsize::new(0);
+
+        let job = |x: i32, w: &Worker<i32>| {
+            PROCESSED.fetch_add(1, Ordering::SeqCst);
+
+            // Generate two new tasks for numbers less than 3
+            if x < 3 {
+                w.push(x * 2);
+                w.push(x * 2 + 1);
+            }
+
+            Ok(Some(x))
+        };
+
+        let result: Vec<i32> = walk(vec![1], 3, job);
+
+        // Should process: 1 -> [2,3] -> [4,5] (no more tasks for 3,4,5)
+        assert_eq!(PROCESSED.load(Ordering::SeqCst), 5);
+        assert_eq!(result.len(), 5);
+        assert!(result.contains(&1));
+        assert!(result.contains(&2));
+        assert!(result.contains(&3));
+        assert!(result.contains(&4));
+        assert!(result.contains(&5));
     }
 
-    pub fn current_count(&self) -> usize {
-        self.active_count.load(Ordering::SeqCst)
+    #[test]
+    fn test_parallel_execution() {
+        static THREADS_USED: AtomicUsize = AtomicUsize::new(0);
+
+        let job = |x: i32, _: &Worker<i32>| {
+            // Record this thread
+            THREADS_USED.fetch_add(1, Ordering::SeqCst);
+            // Simulate work
+            thread::sleep(Duration::from_millis(50));
+            Ok(Some(x))
+        };
+
+        // Process enough items to ensure parallel execution
+        let input: Vec<i32> = (0..10).collect();
+        let num_workers = 4;
+        let result = walk(input, num_workers, job);
+
+        assert_eq!(result.len(), 10);
+        // Verify that multiple threads were used
+        assert!(THREADS_USED.load(Ordering::SeqCst) >= 2);
     }
-}
 
-struct ActiveToken {
-    active_count: Arc<AtomicUsize>,
-}
+    #[test]
+    fn test_none_results() {
+        let job = |x: i32, _: &Worker<i32>| {
+            // Only return Some for even numbers
+            if x % 2 == 0 {
+                Ok(Some(x))
+            } else {
+                Ok(None)
+            }
+        };
 
-impl ActiveToken {
-    fn is_zero(&mut self) -> bool {
-        self.active_count.load(Ordering::SeqCst) == 0
-    }
-}
-
-impl Drop for ActiveToken {
-    fn drop(&mut self) {
-        self.active_count.fetch_sub(1, Ordering::SeqCst);
+        let result: Vec<i32> = walk(vec![1, 2, 3, 4, 5, 6], 2, job);
+        assert_eq!(result.len(), 3);
+        assert!(result.contains(&2));
+        assert!(result.contains(&4));
+        assert!(result.contains(&6));
     }
 }

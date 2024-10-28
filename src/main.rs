@@ -1,6 +1,5 @@
-mod graph_walker;
-mod job;
 mod scrapers;
+mod taskgraph;
 mod textparsers;
 mod workers;
 
@@ -28,19 +27,21 @@ fn main() {
 
     // walk the graph in parallel - as soon as new links/jobs are created, other workers jump in
     // this worker function parses notion pages and saves them as markdown files
-    graph_walker::walk(
+    taskgraph::walk(
         initial,
         10,
-        |(page_url, page_id): (String, String), w: &Worker<(String, String)>| -> Option<()> {
+        |(page_url, page_id): (String, String),
+         w: &Worker<(String, String)>|
+         -> Result<Option<String>, std::fmt::Error> {
             let client = workers::get_http_agent();
-            let doc = scrapers::read_page(client, page_url, page_id.clone(), w)?.join("\n");
+            let doc = scrapers::read_page(client, page_url, page_id.clone(), w)
+                .ok_or(std::fmt::Error)?
+                .join("\n");
             let filename = format!("./doc_{page_id}.md");
-            match fs::write(&filename, doc) {
-                Ok(_) => println!("wrote doc: {}", filename),
-                Err(e) => println!("Unable to write file. Error: {}", e),
+            match fs::write(&filename, doc).map_err(|_| std::fmt::Error) {
+                Err(_) => Result::Err(std::fmt::Error),
+                Ok(_) => Result::Ok(Some(filename)),
             }
-
-            None
         },
     );
 

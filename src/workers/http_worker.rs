@@ -49,6 +49,7 @@ pub fn get_http_agent() -> ureq::Agent {
     return agent;
 }
 
+#[allow(dead_code)]
 pub fn create_http_client() -> reqwest::blocking::Client {
     let key = "AUTH_TOKEN";
     let token = match env::var(key) {
